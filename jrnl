@@ -1,0 +1,154 @@
+#!/usr/bin/env ruby
+
+require 'find'
+require 'date'
+
+class Journal
+  DIR_PATTERN='[0-9][0-9][0-9][0-9]-*'
+
+  class JournalNotFoundError < StandardError; end
+
+  class << self
+    attr_accessor :jrnls
+    attr_accessor :args
+
+    def main
+      @args=ARGV.dup
+      help if args.include?('-h')
+      newest_jrnl if args.empty? or args.include?('-n')
+      select_jrnl if args.delete('-s')
+      list_jrnls if args.delete('-l')
+      grep_jrnls if args.delete('-g')
+      parse_date
+    end
+
+    def help
+      puts <<~eof
+      jrnl - keeps a journal of your life
+
+      Description
+      You can use tags in jrnl entries. Some recommended tags are:
+      #picture, #p        Picture is available
+      #lesson, #l         Something learned
+
+      Usage
+      jrnl [options] <args>
+
+      Examples
+      jrnl feb 2020        # open february 2020
+      jrnl 3 20            # open march 2020
+      jrnl                 # open current month
+      jrnl -s              # open jrnl from list
+
+      Options
+      -d        make a diff merge of two journal files
+      -h        display this help message
+      -l        list journals
+      -s        open a journal from the list
+      -n        open newest journal file (default)
+      -c        create new journal file
+      -m TITLE  make a memories file for current month (TODO implement)
+      -g REGEX  search a REGEX pattern in your memories
+      eof
+      exit
+    end
+
+    # parses date from args and opens corresponding journal
+    def parse_date
+      date = args.join(' ')
+
+      # available formats to parse
+      formats = {
+        '%b %Y' => 'feb 2021',
+        '%b %y' => 'feb 21',
+        '%B %Y' => 'february 2021',
+        '%B %y' => 'february 21',
+        '%m %Y' => '2 2021',
+        '%m %y' => '2 21',
+        '%Y %b' => '2020 feb',
+        '%Y %B' => '2020 february',
+        '%Y %m' => '2020 2'
+      }
+
+      jrnl = ''
+
+      formats.each do |format, _|
+        jrnl = Date.strptime(date, format).to_s[0..-4]
+      rescue Date::Error
+        next
+      end
+      if jrnl.empty?
+        raise Date::Error, "Bad format#{%Q(\nAvailable formats:\n) + formats.values.join(%Q(\n))}"
+      else
+        file = Dir["#{jrnl_dir}/#{jrnl}*/#{jrnl_name}"].shift
+        raise(JournalNotFoundError, jrnl) unless file
+        edit_jrnl(file)
+      end
+    end
+
+    # finds a pattern in the journals
+    def grep_jrnls
+      pattern = Regexp.new(args.shift, 'i')
+      jrnls.each do |f|
+        File.open(f) do |f|
+          f.grep(pattern) do |m|
+            fname = "\e[32m#{f.path.split('/')[-2]}\e[m"
+            res = m.gsub(pattern, "\e[35m" + '\0' + "\e[m")
+            res.sub!(/^ *- /, '')
+            puts %Q(#{fname}:#{res})
+          end
+        end
+      end
+      exit
+    end
+
+    # Merges two journal pages.
+    #
+    # Useful when you have different from different computers.
+    #
+    # TODO Just use YAML.load and merge the two resulting arrays based on the
+    # dates.
+    def diff
+    end
+
+    def select_jrnl
+      puts "Select a journal:"
+      list_jrnls
+      loop do
+        print "> "
+        jrnl=jrnls[STDIN.gets.chomp.to_i]
+        jrnl ? edit_jrnl(jrnl) : raise(JournalNotFoundError.new(jrnl))
+      end
+    end
+
+    def jrnls
+      @jrnls ||= Dir["#{jrnl_dir}/#{DIR_PATTERN}/#{jrnl_name}"].sort
+    end
+
+    def list_jrnls
+      puts (jrnls.map.with_index do |f, i|
+        "#{i}. #{f.split('/')[-2..-1].join('/')}"
+      end)
+    end
+
+    def newest_jrnl
+      edit_jrnl(jrnls.last)
+    end
+
+    def edit_jrnl(jrnl)
+      exec("#{ENV['EDITOR']} #{jrnl}")
+    end
+
+    def jrnl_dir
+      "#{ENV['HOME']}/Pictures"
+    end
+
+    def jrnl_name
+      'memories.yml'
+    end
+  end
+end
+
+Journal.main
+
+# vim: ft=ruby
